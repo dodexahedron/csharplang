@@ -334,7 +334,7 @@ The design also requires that the introduction of a new safe-context: *return-on
 The details of *return-only* is that it's a context which is greater than *function-member* but smaller than *caller-context*. An expression provided to a `return` statement must be at least *return-only*. As such most existing rules fall out. For example assignment into a `ref` parameter from an expression with a *safe-context* of *return-only* will fail because it's smaller than the `ref` parameter's *safe-context* which is *caller-context*. The need for this new escape context will be discussed [below](#rules-unscoped). 
 
 There are three locations which default to *return-only*:
-- A `ref` or `in` parameter with have a *ref-safe-context* of *return-only*. This is done in part for `ref struct` to prevent [silly cyclic assignment](#cyclic-assignment) issues. It is done uniformly though to simplify the model as well as minimize compat changes.
+- A `ref` or `in` parameter will have a *ref-safe-context* of *return-only*. This is done in part for `ref struct` to prevent [silly cyclic assignment](#cyclic-assignment) issues. It is done uniformly though to simplify the model as well as minimize compat changes.
 - A `out` parameter for a `ref struct` will have *safe-context* of *return-only*. This allows for return and `out` to be equally expressive. This does not have the silly cyclic assignment problem because `out` is implicitly `scoped` so the *ref-safe-context* is still smaller than the *safe-context*.
 - A `this` parameter for a `struct` constructor will have a *safe-context* of *return-only*. This falls out due to being modeled as `out` parameters. 
 
@@ -362,7 +362,7 @@ The method invocation rules can now be simplified. The receiver no longer needs 
 > 2. When the return is a `ref struct` the *safe-context* contributed by all argument expressions
 > 3. When the return is a `ref struct` the *ref-safe-context* contributed by all `ref` arguments
 >
-> If `M()` does return ref-to-ref-struct, the *safe-context* is the same as the *safe-context* of all arguments which are ref-to-ref-struct. It is an error if there are multiple arguments with different *safe-context* because of [method arguments must match](#rules-method-arguments-must-match).
+> If `M()` does return ref-to-ref-struct, the *safe-context* is the same as the *safe-context* of all arguments which are ref-to-ref-struct. It is an error if there are multiple arguments with different *safe-context* because of "[method arguments must match](#rules-method-arguments-must-match)".
 
 The `ref` calling rules can be simplified to:
 
@@ -414,21 +414,21 @@ Span<int> ComplexScopedRefExample(scoped ref Span<int> span)
 ### Method arguments must match
 <a name="rules-method-arguments-must-match"></a>
 
-The presence of `ref` fields means the rules around method arguments must match need to be updated as a `ref` parameter can now be stored as a field in a `ref struct` argument to the method. Previously the rule only had to consider another `ref struct` being stored as a field. The impact of this is discussed in [the compat considerations](#compat-considerations). The new rule is ... 
+The presence of `ref` fields means the rules around "method arguments must match" need to be updated because a `ref` parameter of a method can now be stored as a field in an argument to that method whose type is a `ref struct`. Previously, the rule only had to consider another `ref struct` being stored as a field. The impact of this is discussed in [the compat considerations](#compat-considerations). The new rule is ... 
 
 > For any method invocation `e.M(a1, a2, ... aN)`
 > 1. Calculate the narrowest *safe-context* from:
 >     - *caller-context*
 >     - The *safe-context* of all arguments
->     - The *ref-safe-context* of all ref arguments whose corresponding parameters have a *ref-safe-context* of *caller-context*
-> 2. All `ref` arguments of `ref struct` types must be assignable by a value with that *safe-cpmtext*. This is a case where `ref` does **not** generalize to include `in` and `out`
+>     - The *ref-safe-context* of all `ref` arguments whose corresponding parameters have a *ref-safe-context* of *caller-context*
+> 2. All `ref` arguments which are `ref struct` types must be assignable from a value with the *safe-comtext* from item 1. This is a case where `ref` does **not** generalize to include `in` and `out`.
 
 > For any method invocation `e.M(a1, a2, ... aN)`
 > 1. Calculate the narrowest *safe-context* from:
 >     - *caller-context*
 >     - The *safe-context* of all arguments
->     - The *ref-safe-context* of all ref arguments whose corresponding parameters are not `scoped` 
-> 2. All `out` arguments of `ref struct` types must be assignable by a value with that *safe-context*.
+>     - The *ref-safe-context* of all `ref` arguments whose corresponding parameters are not `scoped` 
+> 2. All `out` arguments which are `ref struct` types must be assignable from a value with the *safe-context* from item 1.
 
 The presence of `scoped` allows developers to reduce the friction this rule creates by marking parameters which are not returned as `scoped`. This removes their arguments from (1) in both cases above and provides greater flexibility to callers.
 
@@ -1259,7 +1259,7 @@ ref struct Sneaky
         Sneaky local = default;
 
         // Error: this is illegal, and must be illegal, by our existing rules as the 
-        // ref-safe-context of local is now an input into method arguments must match. 
+        // ref-safe-context of local is now an input into the "method arguments must match" rule. 
         local.SelfAssign();
 
         // This would be dangerous as local now has a dangerous `ref` but the above 
@@ -1932,7 +1932,7 @@ Direct returns don't pose much problems for ref safety. The compiler simply need
 
 Indirect returns pose a significant problem because all `ref` are both an input and output to the method. These outputs already have a known *context*. The compiler can't infer new ones, it has to consider them at their current level. That means the compiler has to look at every single `ref` which is assignable in the called method, evaluate it's *context*, and then verify no returnable input to the method has a smaller *context* than that `ref`. If any such case exists then the method call must be illegal because it could violate `ref` safety. 
 
-Method arguments must match is the process by which the compiler asserts this safety check.
+"Method arguments must match" is the process by which the compiler asserts this safety check.
 
 A different way to evaluate this which is often easier for developers to consider is to do the following exercise: 
 
@@ -2002,7 +2002,7 @@ The set of returnable input to the method are:
 
 Given that there is at least one input with a smaller *escape scope* (`ref y` argument) than one of the outputs (`x` argument) the method call is illegal. 
 
-This is the logic that the method arguments must match rule is trying to encompass. It goes further as it considers both `scoped` as a way to remove inputs from consideration and `readonly` as a way to remove `ref` as an output (can't assign into a `readonly ref` so it can't be a source of output). These special cases do add complexity to the rules but it's done so for the benefit of the developer. The compiler seeks to remove all inputs and outputs it knows can't contribute to the result to give developers maximum flexibility when calling a member. Much like overload resolution it's worth the effort to make our rules more complex when it creates more flexibility for consumers.
+This is the logic that the "method arguments must match" rule is trying to encompass. It goes further as it considers both `scoped` as a way to remove inputs from consideration and `readonly` as a way to remove `ref` as an output (can't assign into a `readonly ref` so it can't be a source of output). These special cases do add complexity to the rules but it's done so for the benefit of the developer. The compiler seeks to remove all inputs and outputs it knows can't contribute to the result to give developers maximum flexibility when calling a member. Much like overload resolution it's worth the effort to make our rules more complex when it creates more flexibility for consumers.
 
 #### Examples of inferred *safe-context* of declaration expressions
 <a id="examples-of-inferred-safe-to-escape-of-declaration-expressions"></a>
